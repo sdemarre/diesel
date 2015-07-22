@@ -4,8 +4,16 @@
 
 ;;; "diesel" goes here. Hacks and glory await!
 
-(defparameter *diesel-data-filename* "c:/users/serge.demarre/appdata/roaming/dieselverbruik.txt")
+(defparameter *diesel-data-filename* "c:/users/serge.demarre/appdata/roaming/src/lisp/systems/diesel/dieselverbruik.txt")
 (defparameter *diesel-line-tokenizer-rx* "([^\" ]+)|(\"[^\"]+\")")
+
+(defun split-str-ints (string separator)
+  (mapcar #'parse-integer (split-sequence:split-sequence separator string)))
+(defun make-universal-time (date-string &optional (time-string "0:0:0"))
+  (destructuring-bind (day month year) (split-str-ints date-string #\-)
+    (destructuring-bind (hour minute &optional (second 0)) (split-str-ints time-string #\:)
+      (encode-universal-time second minute hour day month year))))
+
 (defparameter *diesel-line-decoders*
   (macrolet ((rule (selector-name handler)
 	       (let ((selector (gensym "SELECTOR-")))
@@ -17,13 +25,28 @@
      (rule :prijs-per-liter (parse-float (fourth line-items) :junk-allowed t))
      (rule :prijs (parse-float (fifth line-items) :junk-allowed t))
      (rule :locatie (sixth line-items))
-     (rule :tijd (seventh line-items)))))
+     (rule :tijd (seventh line-items))
+     (rule :ut (make-universal-time (first line-items) (seventh line-items))))))
+
+(defun line-empty-p (line)
+  (string= (format nil "~c" #\Return) line))
 (defun diesel-data-lines ()
   (iter (for line in-file *diesel-data-filename* using #'read-line)
-	(collect (remove #\Return line))))
+	(unless (line-empty-p line)
+	  (collect (remove #\Return line)))))
+(defun normalize-token-order (line-tokens)
+  (flet ((rx-token (rx) (find-if #'(lambda (token) (cl-ppcre:scan rx token)) line-tokens)))
+    (let ((datum-token (rx-token "-"))
+	  (km-token (rx-token "km$"))
+	  (volume-token (rx-token "[0-9]L$"))
+	  (prijs-per-liter-token (rx-token "/L$"))
+	  (prijs-token (rx-token "^[0-9.]+$"))
+	  (locatie-token (rx-token "\""))
+	  (tijd-token (rx-token ":")))
+      (list datum-token km-token volume-token prijs-per-liter-token prijs-token locatie-token tijd-token))))
 (defun diesel-data ()
   (iter (for line in (diesel-data-lines))
-	(collect (cl-ppcre:all-matches-as-strings *diesel-line-tokenizer-rx* line))))
+	(collect (normalize-token-order (cl-ppcre:all-matches-as-strings *diesel-line-tokenizer-rx* line)))))
 (defun find-item-rule (item)
   (let ((rule (iter (for rule in *diesel-line-decoders*)
 	       (when (funcall (car rule) item)
@@ -40,3 +63,13 @@
 	(if (not (cdr items))
 	    (mapcar #'car result)
 	    result)))))
+
+(defun price-differences ()
+  (let ((data (diesel-select '(:km :datum :volume :prijs :prijs-per-liter))))
+    (mapcar #'(lambda (l) (abs (- (* (third l) (fifth l)) (fourth l)))) data)))
+(defun largest-price-difference ()
+  (let ((price-difference (price-differences)))
+    (reduce #'max price-difference)))
+
+(defun normalized-output (&optional (s t))
+  (format s "~{~{~a~^ ~}~%~}" (diesel-data)))

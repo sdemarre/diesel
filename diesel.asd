@@ -5,7 +5,7 @@
   :description "Describe diesel here"
   :author "Your Name <your.name@example.com>"
   :license "Specify license here"
-  :depends-on (:iterate :split-sequence :parse-float)
+  :depends-on (:iterate :split-sequence :parse-float :cl-ppcre)
   :components ((:file "package")
                (:file "diesel")))
 
